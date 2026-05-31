@@ -1,0 +1,18 @@
+Package: fairpaprika
+Title: Fairpaprika: A Procedurally Fair PAPRIKA Engine for Preference Elicitation
+Version: 0.1.1
+Authors@R: 
+    person("Jakub", "Fusiak", , "jakub.fusiak@ibe.med.uni-muenchen.de", role = c("aut", "cre"))
+Description: Implements a procedurally fair PAPRIKA-based preference elicitation engine for multi-criteria decision analysis (MCDA), with a focus on health and medical decision making.
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports: lpSolve, jsonlite, ggplot2
+Suggests: knitr, rmarkdown, testthat (>= 3.0.0), cmdstanr, posterior
+Config/testthat/edition: 3
+VignetteBuilder: knitr
+NeedsCompilation: no
+Packaged: 2026-01-04 19:48:30 UTC; jakub.fusiak
+Author: Jakub Fusiak [aut, cre]
+Maintainer: Jakub Fusiak <jakub.fusiak@ibe.med.uni-muenchen.de>

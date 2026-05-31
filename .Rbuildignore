@@ -1,0 +1,15 @@
+^fairpaprika\.Rproj$
+^\.Rproj\.user$
+^\.Rcheck$
+^fairpaprika\.Rcheck$
+^\.Rcheck\/$
+^\.gitignore$
+^vignettes/\.gitignore$
+^\.\.Rcheck$
+^inst/dev$
+^inst/analysis$
+^test\.R$
+^LICENSE\.md$
+^build$
+^fairpaprika_.*\\.tar\\.gz$
+^fairpaprika\\.zip$

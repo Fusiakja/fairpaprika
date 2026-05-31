@@ -1,0 +1,290 @@
+
+# The fairpaprika Algorithm
+
+**A Procedurally Fair PAPRIKA Engine for Preference Elicitation**
+
+```r
+---
+title: "The fairpaprika Algorithm"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{The fairpaprika Algorithm}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+```
+
+## 1. Overview
+
+The **fairpaprika** package implements a *procedurally constrained* version of the PAPRIKA (Potentially All Pairwise Rankings of all possible Alternatives) method for multi-criteria decision analysis (MCDA).
+
+The goal is to infer **additive part-worth utilities** from a sequence of **pairwise trade-off decisions**, while ensuring:
+
+* procedural fairness of the elicitation process,
+* logical consistency of inferred preferences,
+* robustness against indifference and partial inconsistency,
+* transparency of algorithmic assumptions.
+
+The package provides a **UI-independent core engine** suitable for medical and health decision-making contexts.
+
+---
+
+## 2. Decision Model
+
+### 2.1 Criteria and levels
+
+Let
+[
+\mathcal{C} = {c_1, \dots, c_K}
+]
+denote a finite set of criteria.
+
+Each criterion (c_k) has an **ordered set of levels**:
+[
+L_k = { \ell_{k1} \prec \ell_{k2} \prec \dots \prec \ell_{kJ_k} }
+]
+where the ordering reflects monotone preference (worst → best).
+
+An **alternative** (a) is defined as a vector:
+[
+a = (\ell_{1j_1}, \ell_{2j_2}, \dots, \ell_{Kj_K})
+]
+
+---
+
+### 2.2 Additive utility model
+
+The algorithm assumes an additive value function:
+[
+U(a) = \sum_{k=1}^{K} u_{k}(\ell_{kj_k})
+]
+
+where (u_k(\cdot)) are unknown **part-worth utilities** to be inferred.
+
+No cardinal assumptions are made beyond:
+
+* monotonicity within each criterion,
+* normalization for identifiability.
+
+---
+
+## 3. Elicitation via Pairwise Trade-offs
+
+### 3.1 Decision format
+
+Each elicitation step presents two alternatives (a) and (b), and the decision maker chooses:
+
+* **A**: (a \succ b)
+* **B**: (b \succ a)
+* **E**: (a \sim b) (indifferent)
+
+---
+
+### 3.2 Procedural fairness constraints
+
+To ensure procedural fairness, the engine enforces the following constraints **by construction**:
+
+1. **Exactly two criteria differ**
+   For every comparison:
+   [
+   |{ k : a_k \neq b_k }| = 2
+   ]
+
+2. **Opposite-direction trade-offs (optional)**
+   If enabled, the two differing criteria must move in opposite directions:
+
+   * one improves,
+   * one worsens.
+
+3. **Criterion-pair coverage**
+   Across the elicitation process, **every unordered criterion pair**
+   ((c_i, c_j)) is presented at least once.
+
+These constraints ensure that:
+
+* no criterion is implicitly privileged,
+* preferences are elicited through explicit trade-offs,
+* the process is symmetric and explainable.
+
+---
+
+## 4. Constraint-Based Inference
+
+### 4.1 Preference constraints
+
+Each observed decision induces linear constraints.
+
+#### Strict preference (a \succ b)
+
+[
+U(a) - U(b) \ge \varepsilon
+]
+
+with a small (\varepsilon > 0).
+
+#### Indifference (a \sim b)
+
+Rather than enforcing equality, indifference is modeled as a **tolerance band**:
+[
+-\tau \le U(a) - U(b) \le \tau
+]
+
+This avoids infeasibility due to noisy or weak preferences.
+
+---
+
+### 4.2 Structural constraints
+
+The following constraints are always imposed:
+
+1. **Anchoring**
+   The lowest level of each criterion is fixed to zero:
+   [
+   u_k(\ell_{k1}) = 0
+   ]
+
+2. **Monotonicity**
+   [
+   u_k(\ell_{k,j}) - u_k(\ell_{k,j-1}) \ge \delta
+   ]
+   for all (j > 1), with small (\delta \ge 0).
+
+3. **Normalization**
+   [
+   \sum_{k=1}^{K} u_k(\ell_{k,J_k}) = 1
+   ]
+
+This yields identifiability without affecting ordinal structure.
+
+---
+
+## 5. Regularization and Stability
+
+### 5.1 Motivation
+
+In early or sparse elicitation stages, the feasible region may be large, leading to:
+
+* extreme or unstable solutions,
+* degenerate importance distributions.
+
+---
+
+### 5.2 L1 regularization on criterion maxima
+
+Optionally, the solver minimizes:
+[
+\sum_{k=1}^{K} \left| u_k(\ell_{k,J_k}) - \frac{1}{K} \right|
+]
+
+This:
+
+* encourages balanced solutions when information is weak,
+* does **not** override observed preferences,
+* disappears as data become informative.
+
+---
+
+## 6. Solving the Optimization Problem
+
+All constraints are combined into a **linear program**:
+
+* variables: part-worth utilities (and slack variables if regularized),
+* objective: feasibility or regularized deviation,
+* solver: `lpSolve::lp`.
+
+Outcomes:
+
+* **feasible** → part-worth utilities returned,
+* **infeasible** → explicit diagnostic status, no forced result.
+
+---
+
+## 7. Post-processing and Interpretation
+
+### 7.1 Range-based scaling
+
+To improve interpretability, part-worths are rescaled such that:
+[
+\sum_{k=1}^{K} \left( \max u_k - \min u_k \right) = 100
+]
+
+This yields **relative criterion importance weights**.
+
+---
+
+### 7.2 Diagnostics and health checks
+
+The engine reports:
+
+* number of strict vs. indifferent decisions,
+* share of valid two-difference comparisons,
+* criterion-pair coverage,
+* solver feasibility status.
+
+These diagnostics allow auditing **both the process and the result**.
+
+---
+
+## 8. Handling Edge Cases
+
+### 8.1 Many indifferences
+
+Handled via tolerance bands; the model remains feasible and conservative.
+
+### 8.2 Contradictory preferences
+
+Detected as infeasible LP; no arbitrary resolution is applied.
+
+### 8.3 Sparse data
+
+Regularization prevents premature dominance of criteria.
+
+---
+
+## 9. Relation to Classical PAPRIKA
+
+Compared to classical PAPRIKA implementations, **fairpaprika**:
+
+* explicitly encodes procedural fairness constraints,
+* treats indifference as bounded uncertainty,
+* exposes solver feasibility and diagnostics,
+* is fully reproducible and testable.
+
+---
+
+## 10. Intended Use
+
+The algorithm is designed for:
+
+* medical and health decision support,
+* preference elicitation research,
+* simulation studies of elicitation protocols.
+
+User interfaces and domain-specific outcome models are intentionally out of scope.
+
+---
+
+## 11. Governance & Model Card
+
+For configuration, assumptions, fairness/stop rules, logging, and privacy guidance, see the model card at `inst/model_card.md`. It is the authoritative reference for:
+
+* domains/criteria and allowed interactions,
+* fairness/exposure and stopping settings,
+* audit/procedural-justice reporting,
+* eligibility/dealbreaker policies,
+* uncertainty/robustness communication.
+
+Include the model card (or its contents) when deploying or publishing results for transparent governance.
+
+---
+
+## 12. Summary
+
+The **fairpaprika** algorithm combines:
+
+* PAPRIKA-style elicitation,
+* formal constraint-based inference,
+* procedural fairness guarantees,
+* transparent diagnostics.
+
+This makes it suitable for high-stakes decision contexts where *how* preferences are elicited is as important as *what* preferences are inferred.

@@ -1,0 +1,267 @@
+---
+title: "Classic PAPRIKA Mode"
+author: "fairpaprika"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Classic PAPRIKA Mode}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+## Overview
+
+The `fairpaprika` package implements both the original **Classic PAPRIKA** algorithm (Hansen & Ombler, 2008) and an enhanced **Full Mode** with active learning and uncertainty quantification.
+
+This vignette covers **Classic PAPRIKA Mode**, which provides:
+
+- Systematic two-criterion pairwise questions
+- Dominance-based elimination
+- Transitive closure for efficiency
+- Adaptive outcome-based stopping
+- Real-time Pareto set tracking
+
+## Classic vs. Full Mode
+
+| Feature | Classic Mode | Full Mode |
+|---------|-------------|-----------|
+| Question selection | Systematic pairs | Active learning (EIG) |
+| Weights | Deterministic (LP) | Probabilistic (sampling) |
+| Stopping | Profile resolution | Convergence + budget |
+| Uncertainty | None | Full posterior |
+| Fairness metrics | Basic | Enhanced (Gini, voice) |
+
+## Basic Usage
+
+```{r}
+library(fairpaprika)
+
+# Define decision criteria
+domains <- list(
+    Efficacy = c("Low", "Medium", "High"),
+    SideEffects = c("Severe", "Moderate", "Mild"),
+    Cost = c("Expensive", "Moderate", "Cheap")
+)
+
+# Create engine in classic mode
+settings <- list(
+    mode = "classic",
+    min_q = 3, # Minimum questions before stopping
+    max_q = 50 # Maximum question budget
+)
+
+eng <- engine_create(domains, settings = settings)
+```
+
+## Setting Treatment Profiles
+
+Classic mode shines when ranking specific alternatives:
+
+```{r}
+# Define therapy options
+therapies <- data.frame(
+    Efficacy = c("High", "Medium", "Low"),
+    SideEffects = c("Mild", "Moderate", "Severe"),
+    Cost = c("Expensive", "Moderate", "Cheap"),
+    stringsAsFactors = FALSE
+)
+rownames(therapies) <- c("Therapy_A", "Therapy_B", "Therapy_C")
+
+eng <- engine_set_profiles(eng, therapies)
+```
+
+## Elicitation Loop
+
+```{r}
+while (!engine_done(eng)) {
+    # Get next question
+    nxt <- engine_next_question(eng)
+    if (is.null(nxt$question)) break
+
+    # Present to user (in real app, show via UI)
+    cat("Question: Which do you prefer?\n")
+    cat("  A:", paste(names(nxt$question$a), nxt$question$a, sep = "=", collapse = ", "), "\n")
+    cat("  B:", paste(names(nxt$question$b), nxt$question$b, sep = "=", collapse = ", "), "\n")
+
+    # Get user response
+    pref <- readline("Enter A, B, or E (equal): ")
+
+    # Record decision
+    eng <- nxt$engine
+    eng <- engine_add_decision(eng, pref = pref)
+
+    # Show Pareto set update
+    cat("\n", paprika_pareto_summary(eng), "\n\n")
+}
+```
+
+## Adaptive Stopping
+
+Classic PAPRIKA stops when **all profile pairs are resolved**:
+
+```{r}
+# Check if stopping criterion is met
+if (paprika_all_profiles_resolved(eng)) {
+    cat("All profiles can be strictly ordered - stopping!\n")
+}
+```
+
+This typically requires **far fewer** questions than the maximum budget:
+
+```{r}
+# Example: 5 profiles, 12 possible pairs
+# Questions asked: 6
+# Reduction: 50% (asked only 6 instead of 12)
+```
+
+## Computing Results
+
+```{r}
+eng <- engine_compute(eng)
+
+# View weights
+print(eng$weights)
+
+# View winner probabilities (deterministic in classic mode)
+print(eng$diagnostics$winner_probabilities)
+```
+
+## Enhanced Features
+
+### 1. Real-Time Pareto Tracking
+
+Track which alternatives remain competitive:
+
+```{r}
+# After each decision
+pareto_summary <- paprika_pareto_summary(eng)
+# Returns: "Potentially optimal: 2/5 profiles
+#           Therapy_A, Therapy_C
+#           Just eliminated: Therapy_E"
+```
+
+### 2. Dominated Profile Pruning
+
+Automatically excludes inferior options:
+
+```{r}
+dominated <- eng$diagnostics$dominated_profiles
+dominance_pairs <- eng$diagnostics$dominance_pairs
+
+# dominance_pairs shows: Therapy_A dominates Therapy_B
+```
+
+### 3. Efficiency Diagnostics
+
+Measure question efficiency:
+
+```{r}
+diag <- paprika_diagnostics(eng)
+
+# Questions asked vs. total possible
+print(diag$efficiency$question_efficiency) # e.g., 0.25 = 75% reduction
+
+# Preferences implied by transitivity
+print(diag$efficiency$implied_preferences) # e.g., 15 inferred from 5 asked
+```
+
+### 4. Inconsistency Detection
+
+Detect contradictions in responses:
+
+```{r}
+if (diag$inconsistencies$has_inconsistencies) {
+    cat("Warning: Inconsistent responses detected\n")
+    print(diag$inconsistencies$inconsistency_details)
+}
+```
+
+## Comparison to Traditional PAPRIKA
+
+**Original PAPRIKA (1995-2008):**
+- Manual question enumeration
+- No real-time feedback
+- Post-hoc dominance checking
+
+**fairpaprika Classic Mode:**
+- ✅ All original features
+- ✅ **Plus**: Real-time Pareto tracking
+- ✅ **Plus**: Adaptive stopping
+- ✅ **Plus**: Enhanced diagnostics
+- ✅ **Plus**: Inconsistency detection
+
+## When to Use Classic Mode
+
+**Use Classic Mode when:**
+- You want deterministic, explainable weights
+- Ranking a small set of known alternatives (< 10)
+- Computational simplicity is important
+- No need for uncertainty quantification
+
+**Use Full Mode when:**
+- You need uncertainty estimates (confidence intervals)
+- Large alternative sets or complex interactions
+- Procedural fairness metrics are important (Gini, voice)
+- Active learning for maximum efficiency
+
+## Complete Example
+
+```{r, eval=FALSE}
+library(fairpaprika)
+
+# Setup
+domains <- list(
+    Quality = c("Poor", "Good", "Excellent"),
+    Price = c("High", "Medium", "Low")
+)
+
+products <- data.frame(
+    Quality = c("Excellent", "Good", "Poor"),
+    Price = c("High", "Medium", "Low"),
+    stringsAsFactors = FALSE
+)
+rownames(products) <- c("Premium", "Standard", "Budget")
+
+# Create and run
+eng <- engine_create(domains, settings = list(mode = "classic"))
+eng <- engine_set_profiles(eng, products)
+
+# Simulate consistent user
+set.seed(123)
+while (!engine_done(eng)) {
+    nxt <- engine_next_question(eng)
+    if (is.null(nxt$question)) break
+
+    # Prefer higher quality
+    a_score <- match(nxt$question$a$Quality, domains$Quality)
+    b_score <- match(nxt$question$b$Quality, domains$Quality)
+    pref <- if (a_score > b_score) "A" else if (b_score > a_score) "B" else "E"
+
+    eng <- nxt$engine
+    eng <- engine_add_decision(eng, pref = pref)
+}
+
+# Results
+eng <- engine_compute(eng)
+cat(sprintf(
+    "Winner: %s\n",
+    names(which.max(eng$diagnostics$winner_probabilities))
+))
+
+# Diagnostics
+diag <- paprika_diagnostics(eng)
+cat(diag$summary)
+```
+
+## References
+
+Hansen, P., & Ombler, F. (2008). A new method for scoring additive multi-attribute value models using pairwise rankings of alternatives. *Journal of Multi-Criteria Decision Analysis*, 15(3-4), 87-107.
+
+## See Also
+
+- `vignette("fairpaprika")` - Full mode with active learning
+- `vignette("healthcare-sdm")` - Clinical decision support applications
+- `?paprika_diagnostics` - Enhanced diagnostic functions

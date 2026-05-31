@@ -1,0 +1,432 @@
+---
+title: "Advanced: Interaction Terms"
+author: "fairpaprika package"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Advanced: Interaction Terms}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+# Interaction Terms in Preference Models
+
+This vignette explains **when and how to use interaction terms** in fairpaprika. Interactions allow non-additive preferences - situations where the value of one criterion depends on another.
+
+> **Note:** Interactions add computational complexity. Start without them and add only if needed.
+
+---
+
+## What Are Interactions?
+
+### Additive Model (Default)
+
+```
+utility(Treatment) = w1·Effect + w2·SideEffects + w3·Convenience
+```
+
+Each criterion contributes independently.
+
+### Model with Interactions
+
+```
+utility(Treatment) = w1·Effect + w2·SideEffects + w3·Convenience
+                   + w12·(Effect×SideEffects)
+```
+
+The interaction term `w12` captures synergy or trade-offs between criteria.
+
+---
+
+## When to Use Interactions
+
+### Use interactions when:
+
+1. **Synergies exist**
+   - "High efficacy is only valuable if side effects are low"
+   - "Convenience matters more when monitoring burden is high"
+
+2. **Non-compensatory preferences**
+   - "I won't accept high side effects no matter how effective"
+   - Strict thresholds or deal-breakers
+
+3. **Model doesn't fit well**
+   - High uncertainty in additive model
+   - Bootstrap CIs are very wide
+   - Slack is needed for feasibility
+
+### Don't use interactions when:
+
+1. **Additive model works well** (most cases!)
+2. **Limited decisions** (<15 questions) - insufficient data
+3. **Simplicity is priority** - additive models are more interpretable
+
+---
+
+## Enabling Interactions
+
+```{r enable_interactions}
+library(fairpaprika)
+
+domains <- list(
+    Effect = c("Low", "Medium", "High"),
+    SideEffects = c("High", "Medium", "Low")
+)
+
+# Enable interaction terms
+eng_int <- engine_create(domains,
+    settings = list(
+        interactions = list(
+            enabled = TRUE,
+            pairs = list(c("Effect", "SideEffects"))
+        )
+    )
+)
+```
+
+**Key settings:**
+- `enabled`: Master switch (default: TRUE but no specific pairs)
+- `pairs`: List of criterion pairs to model, e.g., `list(c("A", "B"), c("B", "C"))`
+- `max_abs`: Bound on interaction coefficients (default: 1.5)
+
+---
+
+## Model Comparison
+
+Compare models with and without interactions:
+
+```{r model_comparison}
+# Create both engines
+eng_base <- engine_create(domains, seed = 42)
+
+eng_int <- engine_create(domains,
+    seed = 42,
+    settings = list(
+        interactions = list(
+            enabled = TRUE,
+            pairs = list(c("Effect", "SideEffects"))
+        )
+    )
+)
+
+# Collect same decisions for both
+for (i in 1:10) {
+    nxt_base <- engine_next_question(eng_base)
+    nxt_int <- engine_next_question(eng_int)
+
+    eng_base <- nxt_base$engine
+    eng_int <- nxt_int$engine
+
+    if (is.null(nxt_base$question)) break
+
+    # Same responses
+    pref <- "A"
+    eng_base <- engine_add_decision(eng_base, pref = pref)
+    eng_int <- engine_add_decision(eng_int, pref = pref)
+}
+
+# Compare models
+comp <- model_comparison(eng_base, eng_int, n_samples = 100)
+
+cat("Model Comparison:\n")
+cat(sprintf("  Base model feasible: %s\n", comp$feasible[1]))
+cat(sprintf("  Interaction model feasible: %s\n", comp$feasible[2]))
+cat(sprintf("  Variance ratio (int/base): %.2f\n", comp$variance_ratio))
+cat(sprintf("\n%s\n", comp$recommendation))
+```
+
+**Interpreting results:**
+- **Variance ratio > 1.5**: Interaction model is substantially more flexible
+- **Variance ratio < 1.2**: Models are similar - prefer simpler additive
+- **Variance ratio 1.2-1.5**: Marginal benefit - use clinical judgment
+
+---
+
+## Types of Interactions
+
+### 1. Conditional Tradeoffs
+
+```{r conditional_example, eval=FALSE}
+# Example: "Would you accept Medium Effect with Low SideEffects
+#          vs. High Effect with Medium SideEffects?"
+
+# This tests if patient values Effect differently
+# depending on SideEffects level
+```
+
+**Interpretation:**
+- Positive interaction: Criteria synergize (both high is extra valuable)
+- Negative interaction: Criteria conflict (trade-off is steep)
+
+### 2. Joint Improvements
+
+```{r joint_example, eval=FALSE}
+# Example: "Option A: (Effect:Low, Side:High)
+#          vs. Option B: (Effect:Medium, Side:Medium)"
+
+# This tests if simultaneous improvement matters more than sum of parts
+```
+
+---
+
+## Computational Costs
+
+Interactions have costs:
+
+| Aspect | Additive | With Interactions |
+|--------|----------|-------------------|
+| **Questions** | 15-20 | 20-30 |
+| **Computation** | O(n) | O(n²) |
+| **Interpretability** | High | Moderate |
+| **Data needs** | Low | High |
+
+**Rule of thumb:**
+- **k criteria** → k(k-1)/2 possible interaction pairs
+- Each pair adds ~2-5 questions to test
+- Limit to 1-3 most important pairs
+
+---
+
+## Interaction Settings
+
+```{r interaction_settings}
+# Full configuration
+settings_full <- list(
+    interactions = list(
+        enabled = TRUE,
+
+        # Which pairs to model (leave empty for automatic)
+        pairs = list(c("Effect", "SideEffects")),
+
+        # How many pairs can be active simultaneously
+        max_pairs = 2,
+
+        # Maximum fraction of questions that are interaction questions
+        max_fraction = 0.25, # 25% max
+
+        # Bound on interaction coefficients
+        max_abs = 1.5,
+
+        # When to ask interaction questions
+        activate = list(
+            winner_entropy = 1.0, # High uncertainty triggers
+            slack = TRUE, # Infeasibility triggers
+            min_questions = 6 # Wait until enough base questions
+        ),
+
+        # Question types
+        families = list(
+            conditional = TRUE, # Conditional tradeoff questions
+            joint = TRUE # Joint improvement questions
+        )
+    )
+)
+
+eng_configured <- engine_create(domains, settings = settings_full)
+```
+
+---
+
+## Interpreting Interaction Coefficients
+
+```{r interpret_interactions, eval=FALSE}
+# After solving
+eng_int <- engine_compute(eng_int)
+
+# Look at weights
+print(eng_int$weights)
+
+# Interaction terms have names like "Effect:High×SideEffects:Low"
+# Positive: Synergy (both high is extra good)
+# Negative: Conflict (trade-off is steep)
+# Near zero: Independent (additive model sufficient)
+```
+
+**Clinical example:**
+```
+w(Effect:High) = 0.45
+w(SideEffects:Low) = 0.30
+w(Effect:High × SideEffects:Low) = 0.15  # POSITIVE synergy
+
+→ Treatment with High Effect + Low SideEffects gets:
+  0.45 + 0.30 + 0.15 = 0.90 total utility
+  
+→ The combination is worth MORE than sum of parts
+```
+
+---
+
+## Testing if Interactions are Needed
+
+### Method 1: Bootstrap Uncertainty
+
+```{r bootstrap_test, eval=FALSE}
+# Additive model
+boot_base <- engine_bootstrap(eng_base, B = 100)
+
+# Check confidence intervals
+plot_importance_ci(boot_base)
+
+# If CIs are very wide → might need interactions
+```
+
+### Method 2: Slack Detection
+
+```{r slack_test, eval=FALSE}
+eng_base <- engine_compute(eng_base)
+
+if (!is.null(eng_base$diagnostics$slack_used)) {
+    if (eng_base$diagnostics$slack_used > 0) {
+        cat("Slack detected - consider interaction model\n")
+    }
+}
+```
+
+### Method 3: Residual Analysis
+
+```{r residual_test, eval=FALSE}
+# Sample polytope and check variance
+samples <- engine_polytope_sample(eng_base, n = 500)
+
+# High variance → model uncertainty → maybe interactions help
+```
+
+---
+
+## Practical Workflow
+
+```{r workflow, eval=FALSE}
+# Step 1: Start with additive model
+eng <- engine_create(domains)
+# ... collect decisions ...
+eng <- engine_compute(eng)
+
+# Step 2: Check if additive is sufficient
+quality <- sdm_decision_quality(eng)
+
+if (quality$overall_quality > 0.7) {
+    # Additive model is fine!
+    cat("Additive model sufficient\n")
+} else {
+    # Step 3: Try interaction model
+    eng_int <- engine_create(domains,
+        settings = list(
+            interactions = list(
+                enabled = TRUE,
+                pairs = list(c("Crit1", "Crit2"))
+            )
+        )
+    )
+
+    # Re-elicit or transfer decisions
+    # ...
+
+    # Step 4: Compare
+    comp <- model_comparison(eng, eng_int)
+    print(comp$recommendation)
+}
+```
+
+---
+
+## Common Pitfalls
+
+### 1. Too Many Interactions
+
+```{r too_many, eval=FALSE}
+# BAD: All possible pairs for 5 criteria = 10 pairs!
+# Would need 50+ questions
+
+# GOOD: 1-2 most important pairs
+pairs <- list(c("Effect", "SideEffects"))
+```
+
+### 2. Insufficient Data
+
+```{r insufficient_data, eval=FALSE}
+# Need at least 4-5 questions per interaction pair
+# With <15 total questions → stick to additive
+```
+
+### 3. Over-interpretation
+
+```{r over_interpret, eval=FALSE}
+# Small interaction coefficients (<0.05) are likely noise
+# Focus on large, clinically meaningful interactions (>0.1)
+```
+
+---
+
+## Interaction-Specific Diagnostics
+
+```{r interaction_diagnostics, eval=FALSE}
+# Check if interactions were actually used
+if (!is.null(eng_int$interactions_pairs_active)) {
+    cat("Active interaction pairs:\n")
+    print(eng_int$interactions_pairs_active)
+}
+
+# Check interaction question count
+audit <- eng_int$audit
+int_questions <- sum(vapply(
+    audit,
+    function(x) isTRUE(x$interaction_pair),
+    logical(1)
+))
+
+cat(sprintf(
+    "Interaction questions: %d/%d (%.0f%%)\n",
+    int_questions,
+    length(audit),
+    100 * int_questions / length(audit)
+))
+```
+
+---
+
+## When Interactions Really Matter
+
+### Healthcare Examples:
+
+1. **MS Treatments:**
+   - *Effect × SideEffects*: "Only accept high-efficacy drugs if side effects are manageable"
+   
+2. **Cancer Treatments:**
+   - *Survival × QoL*: "Extra months matter more if quality of life is good"
+   
+3. **Surgical Options:**
+   - *Recovery × Complications*: "Longer recovery acceptable if complication risk is low"
+
+### When NOT to use:
+
+- Routine decisions with clear trade-offs
+- Simple preference structures
+- Limited patient engagement (short sessions)
+
+---
+
+## Key Takeaways
+
+1. **Start without interactions** - most preferences are additive
+2. **Add judiciously** - only 1-3 most important pairs
+3. **Test necessity** - compare models, check uncertainty
+4. **Increase budget** - need 20-30 questions with interactions
+5. **Interpret carefully** - small coefficients may be noise
+6. **Document rationale** - explain why interactions were included
+
+**For most SDM applications, the additive model is sufficient and more interpretable!**
+
+---
+
+## References
+
+- Fishburn, P. C. (1967). **Additive utilities with incomplete product sets**. *Operations Research*
+- Keeney, R. L., & Raiffa, H. (1993). **Decisions with Multiple Objectives**. Cambridge.
+
+```{r session_info}
+sessionInfo()
+```

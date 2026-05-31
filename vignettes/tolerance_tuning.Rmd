@@ -1,0 +1,320 @@
+---
+title: "Advanced: Tolerance Parameter Tuning"
+author: "fairpaprika package"
+date: "`r Sys.Date()`"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Advanced: Tolerance Parameter Tuning}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+# Tolerance Parameters in fairpaprika
+
+This vignette explains the three key tolerance parameters that control the mathematical strictness of preference constraints in fairpaprika. These are **advanced settings** - the defaults work well for most applications.
+
+## The Three Parameters
+
+### 1. `eps_strict` (Default: 1e-3)
+
+**Purpose:** Minimum utility margin for strict preferences ("A preferred to B")
+
+**Mathematical role:**
+```
+If patient prefers A over B: utility(A) - utility(B) ≥ eps_strict
+```
+
+**When to adjust:**
+- **Increase** (to 0.01-0.05) if you want stronger preference differentiation
+- **Decrease** (to 1e-4) if model becomes infeasible with many decisions
+- **Never** set below 1e-6 (numerical precision limits)
+
+**Example:**
+```{r eps_strict_example}
+library(fairpaprika)
+
+domains <- list(A = c("Low", "High"), B = c("Low", "High"))
+
+# Strict enforcement (larger margin)
+eng_strict <- engine_create(domains, settings = list(eps_strict = 0.01))
+
+# Lenient enforcement (smaller margin)
+eng_lenient <- engine_create(domains, settings = list(eps_strict = 1e-4))
+```
+
+---
+
+### 2. `tau_equal` (Default: 1e-3)
+
+**Purpose:** Tolerance band for indifference responses ("A and B are equal")
+
+**Mathematical role:**
+```
+If patient says A ~ B: |utility(A) - utility(B)| ≤ tau_equal
+```
+
+**When to adjust:**
+- **Increase** (to 0.01-0.05) to allow more flexibility in "equal" responses
+- **Decrease** (to 1e-4) for stricter enforcement of indifference
+- Related to `eps_strict` - typically set to same value
+
+**Example:**
+```{r tau_equal_example}
+# Wide indifference band
+eng_wide <- engine_create(domains, settings = list(tau_equal = 0.05))
+
+# Narrow indifference band
+eng_narrow <- engine_create(domains, settings = list(tau_equal = 1e-4))
+```
+
+---
+
+### 3. `epsilon_monotone` (Default: 1e-6)
+
+**Purpose:** Minimum increment between adjacent levels within a criterion
+
+**Mathematical role:**
+```
+For ordered levels (Low < Med < High):
+utility(Med) - utility(Low) ≥ epsilon_monotone
+utility(High) - utility(Med) ≥ epsilon_monotone
+```
+
+**When to adjust:**
+- **Rarely changed** - this is a numerical stability parameter
+- **Increase** (to 1e-4) only if you want to force meaningful level differences
+- **Never** set to zero (would allow degenerate solutions)
+
+**Example:**
+```{r epsilon_monotone_example}
+# Force larger increments
+eng_increments <- engine_create(domains,
+    settings = list(epsilon_monotone = 1e-4)
+)
+```
+
+---
+
+## Sensitivity Analysis
+
+Test how robust your results are to parameter choices:
+
+```{r sensitivity_demo, fig.width=7, fig.height=5}
+# Create example engine
+eng <- engine_create(domains, seed = 42)
+
+# Collect some decisions
+for (i in 1:5) {
+    nxt <- engine_next_question(eng)
+    eng <- nxt$engine
+    if (is.null(nxt$question)) break
+    eng <- engine_add_decision(eng, pref = "A")
+}
+
+eng <- engine_compute(eng)
+
+# Test sensitivity to eps_strict
+sens <- sensitivity_analysis(eng,
+    param = "eps_strict",
+    range = c(0.1, 5.0), # 10% to 500% of default
+    steps = 10
+)
+
+# Check results
+cat("Feasibility across parameter range:\n")
+print(sens$feasible)
+
+cat("\nStability assessment:\n")
+print(sens$summary)
+
+# Visualize
+plot_diagnostics(sens, type = "sensitivity")
+```
+
+**Interpreting results:**
+- **CV < 0.1**: Variable is stable (robust to parameter)
+- **CV 0.1-0.3**: Moderate sensitivity
+- **CV > 0.3**: High sensitivity (results depend on parameter choice)
+
+---
+
+## Decision Tree: When to Adjust Parameters
+
+```
+START: Using default parameters (eps_strict=1e-3, tau_equal=1e-3, epsilon_monotone=1e-6)
+  |
+  ├─ Model is FEASIBLE and results look reasonable
+  │  └─ DON'T CHANGE (defaults are working)
+  |
+  ├─ Model is INFEASIBLE (solve fails)
+  │  ├─ Reduce eps_strict to 1e-4
+  │  ├─ Reduce tau_equal to 1e-4
+  │  └─ If still infeasible: check for contradictory decisions
+  |
+  ├─ All weights are nearly identical (no differentiation)
+  │  └─ Increase eps_strict to 0.01
+  |
+  └─ Indifference responses seem ignored
+     └─ Increase tau_equal to 0.01
+```
+
+---
+
+## Common Scenarios
+
+### Scenario 1: Inconsistent Preferences
+
+**Problem:** Patient gave contradictory responses, model uses slack
+
+```{r inconsistent}
+# Check slack usage
+eng_check <- engine_create(domains)
+# ... collect decisions with contradictions ...
+# eng_check <- engine_compute(eng_check)
+
+# If slack is used:
+# eng_check$diagnostics$slack_used > 0
+```
+
+**Solutions:**
+1. Review decisions with patient (preferred)
+2. Reduce `eps_strict` slightly (1e-4) for more tolerance
+3. Keep slack enabled (default) - it finds closest feasible solution
+
+---
+
+### Scenario 2: High Uncertainty
+
+**Problem:** Bootstrap shows very wide confidence intervals
+
+```{r high_uncertainty, eval=FALSE}
+boot <- engine_bootstrap(eng, B = 200)
+
+# Wide CIs indicate uncertainty
+plot_importance_ci(boot)
+```
+
+**Solutions:**
+1. Collect more decisions (increase question budget)
+2. Check if `tau_equal` is too large (allowing too much indifference)
+3. Use sensitivity analysis to confirm robustness
+
+---
+
+### Scenario 3: Degenerate Solutions
+
+**Problem:** Some criteria get zero importance
+
+```{r degenerate, eval=FALSE}
+# Check importance
+print(eng$importance)
+# If any criterion has 0% importance but should matter...
+```
+
+**Solutions:**
+1. Increase `epsilon_monotone` to 1e-4 (forces level differences)
+2. Check if patient actually doesn't care about that criterion
+3. Verify levels are meaningfully different to patient
+
+---
+
+## Parameter Interactions
+
+The three parameters interact:
+
+**Rule of thumb:**
+```r
+eps_strict ≈ tau_equal >> epsilon_monotone
+```
+
+**Typical configurations:**
+
+```{r configurations}
+# Conservative (stricter constraints)
+conservative <- list(
+    eps_strict = 0.01,
+    tau_equal = 0.01,
+    epsilon_monotone = 1e-4
+)
+
+# Default (balanced)
+default <- list(
+    eps_strict = 1e-3,
+    tau_equal = 1e-3,
+    epsilon_monotone = 1e-6
+)
+
+# Permissive (more tolerant)
+permissive <- list(
+    eps_strict = 1e-4,
+    tau_equal = 1e-4,
+    epsilon_monotone = 1e-6
+)
+```
+
+---
+
+## Computational Implications
+
+**Parameter size affects:**
+
+1. **Feasibility:** Smaller values → easier to satisfy constraints
+2. **Differentiation:** Larger values → stronger preferences expressed
+3. **Numerical stability:** Very small values risk floating-point precision issues
+
+**Recommended ranges:**
+
+| Parameter | Minimum | Default | Maximum |
+|-----------|---------|---------|---------|
+| `eps_strict` | 1e-6 | 1e-3 | 0.1 |
+| `tau_equal` | 1e-6 | 1e-3 | 0.1 |
+| `epsilon_monotone` | 1e-7 | 1e-6 | 1e-3 |
+
+---
+
+## Testing Your Configuration
+
+```{r testing_config}
+# Test a custom configuration
+test_config <- list(
+    eps_strict = 0.005,
+    tau_equal = 0.005,
+    epsilon_monotone = 1e-5
+)
+
+eng_test <- engine_create(domains, settings = test_config)
+
+# Collect decisions and test
+# ... elicitation ...
+# eng_test <- engine_compute(eng_test)
+
+# Run sensitivity analysis to verify robustness
+# sens_test <- sensitivity_analysis(eng_test, ...)
+```
+
+---
+
+## Key Takeaways
+
+1. **Start with defaults** - they work for 95% of applications
+2. **Use sensitivity analysis** - verify results are robust
+3. **Adjust conservatively** - change one parameter at a time
+4. **Document changes** - note why you adjusted parameters
+5. **Validate clinically** - ensure results make clinical sense
+
+**For most healthcare SDM applications, you can ignore these parameters entirely!**
+
+---
+
+## References
+
+- Nocedal & Wright (2006). **Numerical Optimization**. Springer.
+- Boyd & Vandenberghe (2004). **Convex Optimization**. Cambridge.
+
+```{r session_info}
+sessionInfo()
+```

@@ -83,10 +83,20 @@ engine_health <- function(engine) {
 
   if (!is.null(engine$diagnostics$slack)) {
     s_info <- engine$diagnostics$slack
-    slack_vals <- vapply(s_info, function(x) x$slack %||% NA_real_, numeric(1))
-    out$slack_n <- sum(!is.na(slack_vals))
-    out$slack_sum <- sum(slack_vals, na.rm = TRUE)
-    out$slack_max <- if (length(slack_vals)) max(slack_vals, na.rm = TRUE) else NA_real_
+    slack_vals <- if (is.list(s_info)) {
+      vapply(s_info, function(x) {
+        if (is.list(x) && !is.null(x$slack)) {
+          return(as.numeric(x$slack)[1])
+        }
+        suppressWarnings(as.numeric(x)[1])
+      }, numeric(1))
+    } else {
+      suppressWarnings(as.numeric(s_info))
+    }
+    slack_vals <- slack_vals[is.finite(slack_vals)]
+    out$slack_n <- length(slack_vals)
+    out$slack_sum <- if (length(slack_vals)) sum(slack_vals) else NA_real_
+    out$slack_max <- if (length(slack_vals)) max(slack_vals) else NA_real_
   }
 
   class(out) <- "paprika_health"

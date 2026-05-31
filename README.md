@@ -72,6 +72,23 @@ eng <- engine_create(
   )
 )
 
+# Simulated preference model for this example only. In an application, the
+# response comes from the user interface.
+score <- c(
+  "Effect:Low" = 0, "Effect:Medium" = 18, "Effect:High" = 32,
+  "SideEffects:High" = 0, "SideEffects:Low" = 10,
+  "Risks:High" = 0, "Risks:Low" = 24,
+  "Administration:Difficult" = 0, "Administration:Medium" = 6,
+  "Administration:Easy" = 12,
+  "Monitoring:High" = 0, "Monitoring:Low" = 16
+)
+
+score_option <- function(option) {
+  sum(vapply(names(option), function(criterion) {
+    score[[paste(criterion, option[[criterion]], sep = ":")]]
+  }, numeric(1)))
+}
+
 repeat {
   nxt <- engine_next_question(eng)
   eng <- nxt$engine
@@ -80,8 +97,11 @@ repeat {
     break
   }
 
-  # In an application, this response comes from the user interface.
-  eng <- engine_add_decision(eng, pref = "A")
+  u_a <- score_option(nxt$question$a)
+  u_b <- score_option(nxt$question$b)
+  pref <- if (abs(u_a - u_b) < 1e-8) "E" else if (u_a > u_b) "A" else "B"
+
+  eng <- engine_add_decision(eng, pref = pref)
 
   if (engine_done(eng)) {
     break

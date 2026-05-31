@@ -1,9 +1,16 @@
 Package: fairpaprika
-Title: Fairpaprika: A Procedurally Fair PAPRIKA Engine for Preference Elicitation
+Title: PAPRIKA Preference Elicitation for Patient Decision Aids
 Version: 0.1.1
 Authors@R: 
     person("Jakub", "Fusiak", , "jakub.fusiak@ibe.med.uni-muenchen.de", role = c("aut", "cre"))
-Description: Implements a procedurally fair PAPRIKA-based preference elicitation engine for multi-criteria decision analysis (MCDA), with a focus on health and medical decision making.
+Description: Provides tools for implementing PAPRIKA-style preference
+    elicitation in patient decision aids and other multi-criteria decision
+    analysis workflows. The package supports construction of pairwise
+    trade-off question banks, recording of strict and indifferent responses,
+    transitive closure of implied preferences, linear-programming-based
+    estimation of additive part-worth models, answer revision, and diagnostic
+    summaries. Additional experimental modules support uncertainty analysis,
+    benchmarking, and shared decision-making reports.
 License: GPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
